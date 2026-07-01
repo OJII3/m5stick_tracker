@@ -1,10 +1,12 @@
 #include <M5Unified.h>
+#include "ble_hid.h"
 
 static constexpr unsigned long UPDATE_INTERVAL_MS = 10;
 static constexpr int SERIAL_BAUD = 115200;
 
 static unsigned long lastUpdate = 0;
 static unsigned long seq = 0;
+static bool lastBtnState = false;
 
 static void sendImuData() {
   float ax, ay, az, gx, gy, gz;
@@ -12,13 +14,24 @@ static void sendImuData() {
     return;
   }
 
-  if (Serial.availableForWrite() < 80) {
-    return;
+  unsigned long now = millis();
+
+  if (Serial.availableForWrite() >= 80) {
+    Serial.printf("D,%lu,%lu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d\n",
+      seq, now, ax, ay, az, gx, gy, gz, M5.BtnA.isPressed());
   }
 
-  Serial.printf("D,%lu,%lu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d\n",
-    seq, millis(), ax, ay, az, gx, gy, gz, M5.BtnA.isPressed());
+  bleHidSendImu(seq, now, ax, ay, az, gx, gy, gz);
+
   seq++;
+}
+
+static void handleButton() {
+  bool cur = M5.BtnA.isPressed();
+  if (cur != lastBtnState) {
+    lastBtnState = cur;
+    bleHidSendButton(cur);
+  }
 }
 
 static void handleCommands() {
@@ -52,7 +65,9 @@ void setup() {
   M5.Lcd.setTextSize(2);
   M5.Lcd.setTextScroll(true);
   M5.Lcd.println("M5StickS3 Tracker");
-  M5.Lcd.println("Ready");
+
+  bleHidInit();
+  M5.Lcd.println("BLE: started");
 
   bool imuOk = M5.Imu.isEnabled();
   Serial.printf("READY IMU:%s\n", imuOk ? "OK" : "ERR");
@@ -64,6 +79,7 @@ void setup() {
 void loop() {
   M5.update();
   handleCommands();
+  handleButton();
 
   unsigned long now = millis();
   if (now - lastUpdate >= UPDATE_INTERVAL_MS) {
