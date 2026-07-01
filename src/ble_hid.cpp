@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
+static NimBLEServer* pServer = nullptr;
 static NimBLECharacteristic* pImuReportChar = nullptr;
 static NimBLECharacteristic* pBtnReportChar = nullptr;
 
@@ -77,8 +78,10 @@ static class BleServerCallbacks : public NimBLEServerCallbacks {
 
 static class HidControlPointCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* chr, NimBLEConnInfo& connInfo) override {
-    uint8_t val = chr->getValue().data()[0];
-    (void)val;
+    auto value = chr->getValue();
+    if (value.size() == 0) return;
+    uint8_t val = value[0];
+    (void)val; // 0x00=Suspend, 0x01=Exit Suspend — no-op
   }
 } hidControlPointCallbacks;
 
@@ -86,10 +89,10 @@ void bleHidInit() {
   NimBLEDevice::init("M5Stick Tracker");
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);
 
-  NimBLEServer* srv = NimBLEDevice::createServer();
-  srv->setCallbacks(&bleServerCallbacks);
+  pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(&bleServerCallbacks);
 
-  NimBLEService* svc = srv->createService(NimBLEUUID("1812"));
+  NimBLEService* svc = pServer->createService(NimBLEUUID("1812"));
 
   // Report Map characteristic
   NimBLECharacteristic* reportMapChar = svc->createCharacteristic(
@@ -140,6 +143,8 @@ void bleHidInit() {
   auto* adv = NimBLEDevice::getAdvertising();
   adv->setAppearance(0x03C0);
   adv->addServiceUUID(NimBLEUUID("1812"));
+  adv->setMinInterval(240); // 150ms = 240 × 0.625ms
+  adv->setMaxInterval(240);
   adv->start();
 
   Serial.println("BLE: advertising started");
@@ -148,7 +153,7 @@ void bleHidInit() {
 void bleHidSendImu(uint16_t seq, uint32_t ms,
                    float ax, float ay, float az,
                    float gx, float gy, float gz) {
-  if (!pImuReportChar) return;
+  if (!pImuReportChar || pServer->getConnectedCount() == 0) return;
 
   uint8_t report[18];
 
@@ -161,7 +166,10 @@ void bleHidSendImu(uint16_t seq, uint32_t ms,
   report[5] = (ms >> 24) & 0xFF;
 
   auto packI16 = [&](int idx, float val, float scale) {
-    int16_t s = static_cast<int16_t>(val * scale);
+    float scaled = val * scale;
+    if (scaled < -32768.0f) scaled = -32768.0f;
+    if (scaled > 32767.0f) scaled = 32767.0f;
+    int16_t s = static_cast<int16_t>(scaled);
     report[idx] = s & 0xFF;
     report[idx + 1] = (s >> 8) & 0xFF;
   };
@@ -177,7 +185,7 @@ void bleHidSendImu(uint16_t seq, uint32_t ms,
 }
 
 void bleHidSendButton(bool pressed) {
-  if (!pBtnReportChar) return;
+  if (!pBtnReportChar || pServer->getConnectedCount() == 0) return;
 
   uint8_t report[1] = { static_cast<uint8_t>(pressed ? 1 : 0) };
   pBtnReportChar->notify(report, sizeof(report));
