@@ -1,4 +1,5 @@
 #include "ble_hid.h"
+#include <Arduino.h>
 #include <NimBLEDevice.h>
 
 static NimBLECharacteristic* pImuReportChar = nullptr;
@@ -76,7 +77,7 @@ static class BleServerCallbacks : public NimBLEServerCallbacks {
 
 static class HidControlPointCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* chr, NimBLEConnInfo& connInfo) override {
-    uint8_t val = chr->getValue().getData()[0];
+    uint8_t val = chr->getValue().data()[0];
     (void)val;
   }
 } hidControlPointCallbacks;
@@ -136,12 +137,9 @@ void bleHidInit() {
   const uint8_t btnRefValue[] = { 0x02, 0x01 };
   btnRefDesc->setValue(btnRefValue, sizeof(btnRefValue));
 
-  svc->start();
-
   auto* adv = NimBLEDevice::getAdvertising();
   adv->setAppearance(0x03C0);
   adv->addServiceUUID(NimBLEUUID("1812"));
-  adv->setScanResponse(true);
   adv->start();
 
   Serial.println("BLE: advertising started");
@@ -150,7 +148,7 @@ void bleHidInit() {
 void bleHidSendImu(uint16_t seq, uint32_t ms,
                    float ax, float ay, float az,
                    float gx, float gy, float gz) {
-  if (!pImuReportChar || !pImuReportChar->getSubscribedCount()) return;
+  if (!pImuReportChar) return;
 
   uint8_t report[18];
 
@@ -179,8 +177,8 @@ void bleHidSendImu(uint16_t seq, uint32_t ms,
 }
 
 void bleHidSendButton(bool pressed) {
-  if (!pBtnReportChar || !pBtnReportChar->getSubscribedCount()) return;
+  if (!pBtnReportChar) return;
 
-  uint8_t report[1] = { pressed ? 1 : 0 };
+  uint8_t report[1] = { static_cast<uint8_t>(pressed ? 1 : 0) };
   pBtnReportChar->notify(report, sizeof(report));
 }
