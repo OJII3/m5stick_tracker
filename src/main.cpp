@@ -113,11 +113,8 @@ void setup() {
 
   M5.Lcd.setRotation(1);
   M5.Lcd.setTextSize(2);
-  M5.Lcd.setTextScroll(true);
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.println("M5Stick Tracker");
-  M5.Lcd.setCursor(0, STATUS_AREA_HEIGHT);
-  M5.Lcd.println("IMU:");
   drawStatus(true);
 
   bleHidInit();
