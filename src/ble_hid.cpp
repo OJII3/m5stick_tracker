@@ -1,4 +1,7 @@
 #include "ble_hid.h"
+#include <atomic>
+#include <string.h>
+
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
@@ -10,6 +13,11 @@ static NimBLECharacteristic* pBtnReportChar = nullptr;
 
 static volatile bool imuSubscribed = false;
 static volatile bool btnSubscribed = false;
+
+static volatile bleHidState_t gBleState = BLE_HID_ADVERTISING;
+static portMUX_TYPE gPeerMux = portMUX_INITIALIZER_UNLOCKED;
+static char gPeerInfo[64] = "-";
+static std::atomic<uint32_t> gNotifyCount{0};
 
 static const uint8_t hidReportDescriptor[] = {
   0x06, 0x00, 0xFF,
@@ -74,12 +82,25 @@ static class BleServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* srv, NimBLEConnInfo& connInfo) override {
     Serial.printf("BLE: connected handle=%d addr=%s\n",
       connInfo.getConnHandle(), connInfo.getAddress().toString().c_str());
+
+    std::string addr = connInfo.getAddress().toString();
+    const char* src = addr.empty() ? "-" : addr.c_str();
+    taskENTER_CRITICAL(&gPeerMux);
+    strncpy(gPeerInfo, src, sizeof(gPeerInfo) - 1);
+    gPeerInfo[sizeof(gPeerInfo) - 1] = '\0';
+    taskEXIT_CRITICAL(&gPeerMux);
+    gBleState = BLE_HID_CONNECTED;
   }
 
   void onDisconnect(NimBLEServer* srv, NimBLEConnInfo& connInfo, int reason) override {
     Serial.printf("BLE: disconnected reason=%d\n", reason);
     imuSubscribed = false;
     btnSubscribed = false;
+    gBleState = BLE_HID_ADVERTISING;
+    taskENTER_CRITICAL(&gPeerMux);
+    strncpy(gPeerInfo, "-", sizeof(gPeerInfo) - 1);
+    gPeerInfo[sizeof(gPeerInfo) - 1] = '\0';
+    taskEXIT_CRITICAL(&gPeerMux);
     NimBLEDevice::startAdvertising();
   }
 } bleServerCallbacks;
@@ -171,6 +192,7 @@ void bleHidSendImu(uint16_t seq, uint32_t ms,
   packI16(16, gz, 10.0f);
 
   pImuReportChar->notify(report, sizeof(report));
+  gNotifyCount.fetch_add(1, std::memory_order_relaxed);
 }
 
 void bleHidSendButton(bool pressed) {
@@ -213,4 +235,20 @@ void bleHidForceSendImu(uint16_t seq, uint32_t ms,
 
   // notify() will return false if not subscribed, but the call itself is harmless
   pImuReportChar->notify(report, sizeof(report));
+}
+
+bleHidState_t bleHidGetState() {
+  return gBleState;
+}
+
+void bleHidGetPeerName(char* buf, size_t len) {
+  if (buf == nullptr || len == 0) return;
+  taskENTER_CRITICAL(&gPeerMux);
+  strncpy(buf, gPeerInfo, len - 1);
+  buf[len - 1] = '\0';
+  taskEXIT_CRITICAL(&gPeerMux);
+}
+
+uint32_t bleHidConsumeNotifyCount() {
+  return gNotifyCount.exchange(0, std::memory_order_relaxed);
 }
