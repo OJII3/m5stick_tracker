@@ -22,7 +22,9 @@ static void drawStatus(bool force) {
   char peer[64];
   bleHidGetPeerName(peer, sizeof(peer));
   uint32_t count = bleHidConsumeNotifyCount();
-  int hz = static_cast<int>(count);
+  int hz = (state == BLE_HID_CONNECTED && bleHidImuSubscribed())
+             ? static_cast<int>(count)
+             : 0;
 
   if (!force && state == lastDrawnState &&
       strncmp(peer, lastDrawnPeer, sizeof(lastDrawnPeer)) == 0 &&
