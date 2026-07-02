@@ -1,8 +1,10 @@
 #include "ble_hid.h"
 #include <Arduino.h>
 #include <NimBLEDevice.h>
+#include <NimBLEHIDDevice.h>
 
 static NimBLEServer* pServer = nullptr;
+static NimBLEHIDDevice* pHid = nullptr;
 static NimBLECharacteristic* pImuReportChar = nullptr;
 static NimBLECharacteristic* pBtnReportChar = nullptr;
 
@@ -67,23 +69,15 @@ static const uint8_t hidReportDescriptor[] = {
 
 static class BleServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* srv, NimBLEConnInfo& connInfo) override {
-    Serial.println("BLE: connected");
+    Serial.printf("BLE: connected handle=%d addr=%s\n",
+      connInfo.getConnHandle(), connInfo.getAddress().toString().c_str());
   }
 
   void onDisconnect(NimBLEServer* srv, NimBLEConnInfo& connInfo, int reason) override {
-    Serial.println("BLE: disconnected");
+    Serial.printf("BLE: disconnected reason=%d\n", reason);
     NimBLEDevice::startAdvertising();
   }
 } bleServerCallbacks;
-
-static class HidControlPointCallbacks : public NimBLECharacteristicCallbacks {
-  void onWrite(NimBLECharacteristic* chr, NimBLEConnInfo& connInfo) override {
-    auto value = chr->getValue();
-    if (value.size() == 0) return;
-    uint8_t val = value[0];
-    (void)val; // 0x00=Suspend, 0x01=Exit Suspend — no-op
-  }
-} hidControlPointCallbacks;
 
 void bleHidInit() {
   NimBLEDevice::init("M5Stick Tracker");
@@ -92,59 +86,21 @@ void bleHidInit() {
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(&bleServerCallbacks);
 
-  NimBLEService* svc = pServer->createService(NimBLEUUID("1812"));
+  pHid = new NimBLEHIDDevice(pServer);
 
-  // Report Map characteristic
-  NimBLECharacteristic* reportMapChar = svc->createCharacteristic(
-    NimBLEUUID("2A4B"),
-    NIMBLE_PROPERTY::READ
-  );
-  reportMapChar->setValue(hidReportDescriptor, sizeof(hidReportDescriptor));
+  pHid->setManufacturer("M5Stack");
+  pHid->setPnp(0x02, 0x1234, 0x0001, 0x0100);
+  pHid->setHidInfo(0x00, 0x02);
+  pHid->setReportMap((uint8_t*)hidReportDescriptor, sizeof(hidReportDescriptor));
 
-  // HID Information characteristic
-  NimBLECharacteristic* hidInfoChar = svc->createCharacteristic(
-    NimBLEUUID("2A4A"),
-    NIMBLE_PROPERTY::READ
-  );
-  const uint8_t hidInfo[] = { 0x01, 0x01, 0x00, 0x02 };
-  hidInfoChar->setValue(hidInfo, sizeof(hidInfo));
-
-  // HID Control Point characteristic
-  NimBLECharacteristic* ctrlPtChar = svc->createCharacteristic(
-    NimBLEUUID("2A4C"),
-    NIMBLE_PROPERTY::WRITE_NR
-  );
-  ctrlPtChar->setCallbacks(&hidControlPointCallbacks);
-
-  // Report characteristic for IMU (Report ID=1)
-  pImuReportChar = svc->createCharacteristic(
-    NimBLEUUID("2A4D"),
-    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
-  );
-  NimBLEDescriptor* imuRefDesc = pImuReportChar->createDescriptor(
-    NimBLEUUID("2A48"),
-    NIMBLE_PROPERTY::READ
-  );
-  const uint8_t imuRefValue[] = { 0x01, 0x01 };
-  imuRefDesc->setValue(imuRefValue, sizeof(imuRefValue));
-
-  // Report characteristic for Button (Report ID=2)
-  pBtnReportChar = svc->createCharacteristic(
-    NimBLEUUID("2A4D"),
-    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
-  );
-  NimBLEDescriptor* btnRefDesc = pBtnReportChar->createDescriptor(
-    NimBLEUUID("2A48"),
-    NIMBLE_PROPERTY::READ
-  );
-  const uint8_t btnRefValue[] = { 0x02, 0x01 };
-  btnRefDesc->setValue(btnRefValue, sizeof(btnRefValue));
+  pImuReportChar = pHid->getInputReport(1);
+  pBtnReportChar = pHid->getInputReport(2);
 
   auto* adv = NimBLEDevice::getAdvertising();
   adv->setAppearance(0x03C0);
-  adv->addServiceUUID(NimBLEUUID("1812"));
-  adv->setMinInterval(240); // 150ms = 240 × 0.625ms
-  adv->setMaxInterval(240);
+  adv->addServiceUUID(pHid->getHidService()->getUUID());
+  adv->addServiceUUID(pHid->getDeviceInfoService()->getUUID());
+  adv->addServiceUUID(pHid->getBatteryService()->getUUID());
   adv->start();
 
   Serial.println("BLE: advertising started");
