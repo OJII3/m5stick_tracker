@@ -10,6 +10,46 @@ static unsigned long lastHeartbeat = 0;
 static unsigned long seq = 0;
 static bool lastBtnState = false;
 
+static constexpr int STATUS_AREA_HEIGHT = 64;
+static constexpr unsigned long STATUS_REFRESH_MS = 1000;
+static unsigned long lastStatusDraw = 0;
+static bleHidState_t lastDrawnState = BLE_HID_ADVERTISING;
+static char lastDrawnPeer[64] = "";
+static int lastDrawnHz = -1;
+
+static void drawStatus(bool force) {
+  bleHidState_t state = bleHidGetState();
+  char peer[64];
+  bleHidGetPeerName(peer, sizeof(peer));
+  uint32_t count = bleHidConsumeNotifyCount();
+  int hz = (state == BLE_HID_CONNECTED && bleHidImuSubscribed())
+             ? static_cast<int>(count)
+             : 0;
+
+  if (!force && state == lastDrawnState &&
+      strncmp(peer, lastDrawnPeer, sizeof(lastDrawnPeer)) == 0 &&
+      hz == lastDrawnHz) {
+    return;
+  }
+
+  M5.Lcd.fillRect(0, 0, M5.Lcd.width(), STATUS_AREA_HEIGHT, BLACK);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.setTextColor(WHITE, BLACK);
+  M5.Lcd.setCursor(0, 0);
+  M5.Lcd.println("M5Stick Tracker");
+  M5.Lcd.setCursor(0, 16);
+  M5.Lcd.printf("BT: %s\n", state == BLE_HID_CONNECTED ? "connected" : "advertising");
+  M5.Lcd.setCursor(0, 32);
+  M5.Lcd.printf("Peer: %s\n", peer);
+  M5.Lcd.setCursor(0, 48);
+  M5.Lcd.printf("IMU notify: %d Hz", hz);
+
+  lastDrawnState = state;
+  strncpy(lastDrawnPeer, peer, sizeof(lastDrawnPeer) - 1);
+  lastDrawnPeer[sizeof(lastDrawnPeer) - 1] = '\0';
+  lastDrawnHz = hz;
+}
+
 static void sendImuData() {
   float ax, ay, az, gx, gy, gz;
   if (!M5.Imu.getAccel(&ax, &ay, &az) || !M5.Imu.getGyro(&gx, &gy, &gz)) {
@@ -73,17 +113,14 @@ void setup() {
 
   M5.Lcd.setRotation(1);
   M5.Lcd.setTextSize(2);
-  M5.Lcd.setTextScroll(true);
-  M5.Lcd.println("M5StickS3 Tracker");
+  M5.Lcd.setCursor(0, 0);
+  M5.Lcd.println("M5Stick Tracker");
+  drawStatus(true);
 
   bleHidInit();
-  M5.Lcd.println("BLE: started");
 
   bool imuOk = M5.Imu.isEnabled();
   Serial.printf("READY IMU:%s\n", imuOk ? "OK" : "ERR");
-  if (!imuOk) {
-    M5.Lcd.println("IMU ERR");
-  }
 }
 
 void loop() {
@@ -91,10 +128,15 @@ void loop() {
   handleCommands();
   handleButton();
 
+  unsigned long nowMs = millis();
+  if (nowMs - lastStatusDraw >= STATUS_REFRESH_MS) {
+    lastStatusDraw = nowMs;
+    drawStatus(false);
+  }
+
   if (bleHidIsConnected()) {
-    unsigned long now = millis();
-    if (now - lastUpdate >= UPDATE_INTERVAL_MS) {
-      lastUpdate = now;
+    if (nowMs - lastUpdate >= UPDATE_INTERVAL_MS) {
+      lastUpdate = nowMs;
       sendImuData();
     }
   }
