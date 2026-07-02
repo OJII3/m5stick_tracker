@@ -16,6 +16,25 @@ M5StickS3 を肘トラッカーとして使うファームウェア。
 pio run -e m5sticks3 -t upload --upload-port /dev/ttyACM0
 ```
 
+## LCD 表示
+
+画面上部に 4 行のステータスを常時表示する。下部は IMU ログのスクロール領域。
+
+```
+M5Stick Tracker
+BT: connected
+Peer: iPhone
+IMU notify: 49 Hz
+```
+
+| 行 | 意味 |
+|---|---|
+| `BT` | Bluetooth の接続状態 (`advertising` / `connected`)。IMU 購読の有無は含まない。 |
+| `Peer` | 接続中の相手名 (取れれば名前、無ければ `AA:BB:CC:DD:EE:FF` の MAC、未接続時は `-`)。 |
+| `IMU notify` | 直近 1 秒間に BLE IMU notify が実際に送信された回数。購読なしは `0 Hz`。 |
+
+ステータスは 1 秒ごとに更新する。変化がないフレームは LCD 書き込みをスキップする。
+
 ## 通信プロトコル
 
 USB CDC Serial @ 115200 baud, 8N1.
