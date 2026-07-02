@@ -1,10 +1,12 @@
 #include <M5Unified.h>
 #include "ble_hid.h"
 
-static constexpr unsigned long UPDATE_INTERVAL_MS = 20;     // 50Hz loop
+static constexpr unsigned long UPDATE_INTERVAL_MS = 20;     // 50Hz when subscribed
+static constexpr unsigned long HEARTBEAT_MS = 1000;         // 1Hz heartbeat when connected but not subscribed
 static constexpr int SERIAL_BAUD = 115200;
 
 static unsigned long lastUpdate = 0;
+static unsigned long lastHeartbeat = 0;
 static unsigned long seq = 0;
 static bool lastBtnState = false;
 
@@ -21,7 +23,15 @@ static void sendImuData() {
       seq, now, ax, ay, az, gx, gy, gz, M5.BtnA.isPressed());
   }
 
-  bleHidSendImu(seq, now, ax, ay, az, gx, gy, gz);
+  if (bleHidImuSubscribed()) {
+    bleHidSendImu(seq, now, ax, ay, az, gx, gy, gz);
+  } else {
+    // Heartbeat: send a 1Hz notify to keep the BLE link alive
+    if (now - lastHeartbeat >= HEARTBEAT_MS) {
+      lastHeartbeat = now;
+      bleHidForceSendImu(seq, now, ax, ay, az, gx, gy, gz);
+    }
+  }
 
   seq++;
 }
@@ -81,7 +91,7 @@ void loop() {
   handleCommands();
   handleButton();
 
-  if (bleHidIsConnected() && bleHidImuSubscribed()) {
+  if (bleHidIsConnected()) {
     unsigned long now = millis();
     if (now - lastUpdate >= UPDATE_INTERVAL_MS) {
       lastUpdate = now;

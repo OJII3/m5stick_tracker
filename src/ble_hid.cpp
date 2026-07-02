@@ -179,3 +179,38 @@ void bleHidSendButton(bool pressed) {
   uint8_t report[1] = { static_cast<uint8_t>(pressed ? 1 : 0) };
   pBtnReportChar->notify(report, sizeof(report));
 }
+
+void bleHidForceSendImu(uint16_t seq, uint32_t ms,
+                        float ax, float ay, float az,
+                        float gx, float gy, float gz) {
+  if (!pImuReportChar) return;
+
+  uint8_t report[18];
+
+  report[0] = seq & 0xFF;
+  report[1] = (seq >> 8) & 0xFF;
+
+  report[2] = ms & 0xFF;
+  report[3] = (ms >> 8) & 0xFF;
+  report[4] = (ms >> 16) & 0xFF;
+  report[5] = (ms >> 24) & 0xFF;
+
+  auto packI16 = [&](int idx, float val, float scale) {
+    float scaled = val * scale;
+    if (scaled < -32768.0f) scaled = -32768.0f;
+    if (scaled > 32767.0f) scaled = 32767.0f;
+    int16_t s = static_cast<int16_t>(scaled);
+    report[idx] = s & 0xFF;
+    report[idx + 1] = (s >> 8) & 0xFF;
+  };
+
+  packI16(6,  ax, 1000.0f);
+  packI16(8,  ay, 1000.0f);
+  packI16(10, az, 1000.0f);
+  packI16(12, gx, 10.0f);
+  packI16(14, gy, 10.0f);
+  packI16(16, gz, 10.0f);
+
+  // notify() will return false if not subscribed, but the call itself is harmless
+  pImuReportChar->notify(report, sizeof(report));
+}
