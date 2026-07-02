@@ -101,6 +101,10 @@ void bleHidInit() {
   NimBLEDevice::init("M5Stick Tracker");
   NimBLEDevice::setPower(ESP_PWR_LVL_P9);
 
+  // Just-works pairing, no bonding, no MITM
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+  NimBLEDevice::setSecurityAuth(false, false, false);
+
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(&bleServerCallbacks);
 
