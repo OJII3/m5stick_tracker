@@ -8,6 +8,9 @@ static NimBLEHIDDevice* pHid = nullptr;
 static NimBLECharacteristic* pImuReportChar = nullptr;
 static NimBLECharacteristic* pBtnReportChar = nullptr;
 
+static volatile bool imuSubscribed = false;
+static volatile bool btnSubscribed = false;
+
 static const uint8_t hidReportDescriptor[] = {
   0x06, 0x00, 0xFF,
   0x09, 0x01,
@@ -75,9 +78,24 @@ static class BleServerCallbacks : public NimBLEServerCallbacks {
 
   void onDisconnect(NimBLEServer* srv, NimBLEConnInfo& connInfo, int reason) override {
     Serial.printf("BLE: disconnected reason=%d\n", reason);
+    imuSubscribed = false;
+    btnSubscribed = false;
     NimBLEDevice::startAdvertising();
   }
 } bleServerCallbacks;
+
+static class InputReportCallbacks : public NimBLECharacteristicCallbacks {
+  void onSubscribe(NimBLECharacteristic* chr, NimBLEConnInfo& connInfo, uint16_t subValue) override {
+    bool subscribed = (subValue != 0);
+    if (chr == pImuReportChar) {
+      imuSubscribed = subscribed;
+      Serial.printf("BLE: imu %s\n", subscribed ? "subscribed" : "unsubscribed");
+    } else if (chr == pBtnReportChar) {
+      btnSubscribed = subscribed;
+      Serial.printf("BLE: btn %s\n", subscribed ? "subscribed" : "unsubscribed");
+    }
+  }
+} inputReportCallbacks;
 
 void bleHidInit() {
   NimBLEDevice::init("M5Stick Tracker");
@@ -95,6 +113,8 @@ void bleHidInit() {
 
   pImuReportChar = pHid->getInputReport(1);
   pBtnReportChar = pHid->getInputReport(2);
+  pImuReportChar->setCallbacks(&inputReportCallbacks);
+  pBtnReportChar->setCallbacks(&inputReportCallbacks);
 
   auto* adv = NimBLEDevice::getAdvertising();
   adv->setAppearance(0x03C0);
@@ -109,7 +129,7 @@ void bleHidInit() {
 void bleHidSendImu(uint16_t seq, uint32_t ms,
                    float ax, float ay, float az,
                    float gx, float gy, float gz) {
-  if (!pImuReportChar || pServer->getConnectedCount() == 0) return;
+  if (!pImuReportChar || !imuSubscribed) return;
 
   uint8_t report[18];
 
@@ -141,7 +161,7 @@ void bleHidSendImu(uint16_t seq, uint32_t ms,
 }
 
 void bleHidSendButton(bool pressed) {
-  if (!pBtnReportChar || pServer->getConnectedCount() == 0) return;
+  if (!pBtnReportChar || !btnSubscribed) return;
 
   uint8_t report[1] = { static_cast<uint8_t>(pressed ? 1 : 0) };
   pBtnReportChar->notify(report, sizeof(report));
