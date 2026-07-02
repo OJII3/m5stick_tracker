@@ -121,6 +121,7 @@ void bleHidInit() {
   pBtnReportChar->setCallbacks(&inputReportCallbacks);
 
   auto* adv = NimBLEDevice::getAdvertising();
+  adv->setName("M5Stick Tracker");
   adv->setAppearance(0x03C0);
   adv->addServiceUUID(pHid->getHidService()->getUUID());
   adv->addServiceUUID(pHid->getDeviceInfoService()->getUUID());
