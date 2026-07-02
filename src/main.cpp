@@ -1,7 +1,7 @@
 #include <M5Unified.h>
 #include "ble_hid.h"
 
-static constexpr unsigned long UPDATE_INTERVAL_MS = 10;
+static constexpr unsigned long UPDATE_INTERVAL_MS = 20;     // 50Hz loop
 static constexpr int SERIAL_BAUD = 115200;
 
 static unsigned long lastUpdate = 0;
@@ -81,9 +81,13 @@ void loop() {
   handleCommands();
   handleButton();
 
-  unsigned long now = millis();
-  if (now - lastUpdate >= UPDATE_INTERVAL_MS) {
-    lastUpdate = now;
-    sendImuData();
+  if (bleHidIsConnected() && bleHidImuSubscribed()) {
+    unsigned long now = millis();
+    if (now - lastUpdate >= UPDATE_INTERVAL_MS) {
+      lastUpdate = now;
+      sendImuData();
+    }
   }
+
+  delay(10);
 }

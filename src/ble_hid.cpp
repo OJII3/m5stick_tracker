@@ -131,6 +131,14 @@ void bleHidInit() {
   Serial.println("BLE: advertising started");
 }
 
+bool bleHidIsConnected() {
+  return pServer != nullptr && pServer->getConnectedCount() > 0;
+}
+
+bool bleHidImuSubscribed() {
+  return imuSubscribed;
+}
+
 void bleHidSendImu(uint16_t seq, uint32_t ms,
                    float ax, float ay, float az,
                    float gx, float gy, float gz) {
