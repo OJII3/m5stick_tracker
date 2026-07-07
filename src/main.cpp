@@ -1,8 +1,8 @@
 #include <M5Unified.h>
-#include "ble_hid.h"
+#include "ble_gatt.h"
 
-static constexpr unsigned long UPDATE_INTERVAL_MS = 20;     // 50Hz when subscribed
-static constexpr unsigned long HEARTBEAT_MS = 1000;         // 1Hz heartbeat when connected but not subscribed
+static constexpr unsigned long UPDATE_INTERVAL_MS = 20;     // 50Hz when notified
+static constexpr unsigned long HEARTBEAT_MS = 1000;         // 1Hz heartbeat when connected but not notified
 static constexpr int SERIAL_BAUD = 115200;
 
 static unsigned long lastUpdate = 0;
@@ -13,16 +13,16 @@ static bool lastBtnState = false;
 static constexpr int STATUS_AREA_HEIGHT = 64;
 static constexpr unsigned long STATUS_REFRESH_MS = 1000;
 static unsigned long lastStatusDraw = 0;
-static bleHidState_t lastDrawnState = BLE_HID_ADVERTISING;
+static bleGattState_t lastDrawnState = BLE_GATT_ADVERTISING;
 static char lastDrawnPeer[64] = "";
 static int lastDrawnHz = -1;
 
 static void drawStatus(bool force) {
-  bleHidState_t state = bleHidGetState();
+  bleGattState_t state = bleGattGetState();
   char peer[64];
-  bleHidGetPeerName(peer, sizeof(peer));
-  uint32_t count = bleHidConsumeNotifyCount();
-  int hz = (state == BLE_HID_CONNECTED && bleHidImuSubscribed())
+  bleGattGetPeerName(peer, sizeof(peer));
+  uint32_t count = bleGattConsumeNotifyCount();
+  int hz = (state == BLE_GATT_CONNECTED && bleGattNotifyEnabled())
              ? static_cast<int>(count)
              : 0;
 
@@ -38,11 +38,11 @@ static void drawStatus(bool force) {
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.println("M5Stick Tracker");
   M5.Lcd.setCursor(0, 16);
-  M5.Lcd.printf("BT: %s\n", state == BLE_HID_CONNECTED ? "connected" : "advertising");
+  M5.Lcd.printf("BT: %s\n", state == BLE_GATT_CONNECTED ? "connected" : "advertising");
   M5.Lcd.setCursor(0, 32);
   M5.Lcd.printf("Peer: %s\n", peer);
   M5.Lcd.setCursor(0, 48);
-  M5.Lcd.printf("IMU notify: %d Hz", hz);
+  M5.Lcd.printf("Notify: %d Hz", hz);
 
   lastDrawnState = state;
   strncpy(lastDrawnPeer, peer, sizeof(lastDrawnPeer) - 1);
@@ -50,38 +50,30 @@ static void drawStatus(bool force) {
   lastDrawnHz = hz;
 }
 
-static void sendImuData() {
+static void sendSample(bool force) {
   float ax, ay, az, gx, gy, gz;
   if (!M5.Imu.getAccel(&ax, &ay, &az) || !M5.Imu.getGyro(&gx, &gy, &gz)) {
     return;
   }
 
   unsigned long now = millis();
+  bool buttonPressed = M5.BtnA.isPressed();
 
   if (Serial.availableForWrite() >= 80) {
     Serial.printf("D,%lu,%lu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d\n",
-      seq, now, ax, ay, az, gx, gy, gz, M5.BtnA.isPressed());
+      seq, now, ax, ay, az, gx, gy, gz, buttonPressed ? 1 : 0);
   }
 
-  if (bleHidImuSubscribed()) {
-    bleHidSendImu(seq, now, ax, ay, az, gx, gy, gz);
-  } else {
-    // Heartbeat: send a 1Hz notify to keep the BLE link alive
-    if (now - lastHeartbeat >= HEARTBEAT_MS) {
-      lastHeartbeat = now;
-      bleHidForceSendImu(seq, now, ax, ay, az, gx, gy, gz);
-    }
+  if (bleGattNotifyEnabled() || force) {
+    bleGattSendSample(static_cast<uint16_t>(seq & 0xFFFF), now,
+                      ax, ay, az, gx, gy, gz, buttonPressed);
+  } else if (now - lastHeartbeat >= HEARTBEAT_MS) {
+    lastHeartbeat = now;
+    bleGattSendSample(static_cast<uint16_t>(seq & 0xFFFF), now,
+                      ax, ay, az, gx, gy, gz, buttonPressed);
   }
 
   seq++;
-}
-
-static void handleButton() {
-  bool cur = M5.BtnA.isPressed();
-  if (cur != lastBtnState) {
-    lastBtnState = cur;
-    bleHidSendButton(cur);
-  }
 }
 
 static void handleCommands() {
@@ -117,7 +109,7 @@ void setup() {
   M5.Lcd.println("M5Stick Tracker");
   drawStatus(true);
 
-  bleHidInit();
+  bleGattInit();
 
   bool imuOk = M5.Imu.isEnabled();
   Serial.printf("READY IMU:%s\n", imuOk ? "OK" : "ERR");
@@ -126,7 +118,10 @@ void setup() {
 void loop() {
   M5.update();
   handleCommands();
-  handleButton();
+
+  if (lastBtnState != M5.BtnA.isPressed()) {
+    lastBtnState = M5.BtnA.isPressed();
+  }
 
   unsigned long nowMs = millis();
   if (nowMs - lastStatusDraw >= STATUS_REFRESH_MS) {
@@ -134,10 +129,10 @@ void loop() {
     drawStatus(false);
   }
 
-  if (bleHidIsConnected()) {
+  if (bleGattIsConnected()) {
     if (nowMs - lastUpdate >= UPDATE_INTERVAL_MS) {
       lastUpdate = nowMs;
-      sendImuData();
+      sendSample(false);
     }
   }
 
