@@ -121,7 +121,6 @@ void bleGattSendSample(uint16_t seq, uint32_t ms,
                        float gx, float gy, float gz,
                        bool buttonA) {
   if (!pSampleChar) return;
-  if (!bleGattNotifyEnabled()) return;
 
   uint8_t packet[19];
 
@@ -151,8 +150,9 @@ void bleGattSendSample(uint16_t seq, uint32_t ms,
 
   packet[18] = buttonA ? 1 : 0;
 
-  pSampleChar->notify(packet, sizeof(packet));
-  notifyCount.fetch_add(1, std::memory_order_relaxed);
+  if (pSampleChar->notify(packet, sizeof(packet))) {
+    notifyCount.fetch_add(1, std::memory_order_relaxed);
+  }
 }
 
 bleGattState_t bleGattGetState() {
