@@ -121,7 +121,6 @@ void bleGattSendSample(uint16_t seq, uint32_t ms,
                        float gx, float gy, float gz,
                        bool buttonA) {
   if (!pSampleChar) return;
-  if (!bleGattNotifyEnabled()) return;
 
   uint8_t packet[19];
 
